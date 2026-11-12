@@ -30,7 +30,8 @@ if (!gotLock) {
 signale.time("Startup");
 
 const electron = require("electron");
-require('@electron/remote/main').initialize()
+const remoteMain = require('@electron/remote/main');
+remoteMain.initialize();
 const ipc = electron.ipcMain;
 const path = require("path");
 const url = require("url");
@@ -58,10 +59,17 @@ const innerFontsDir = path.join(__dirname, "assets/fonts");
 if (process.env.http_proxy) delete process.env.http_proxy;
 if (process.env.https_proxy) delete process.env.https_proxy;
 
-// Bypass GPU acceleration blocklist, trading a bit of stability for a great deal of performance, mostly on Linux
-app.commandLine.appendSwitch("ignore-gpu-blocklist");
-app.commandLine.appendSwitch("enable-gpu-rasterization");
-app.commandLine.appendSwitch("enable-video-decode");
+if (process.platform === "darwin") {
+    // Apple Silicon / macOS: Chromium already renders through Metal (ANGLE) here, the blocklist
+    // overrides below only matter on Linux. Just make sure rasterization happens on the GPU.
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-zero-copy");
+} else {
+    // Bypass GPU acceleration blocklist, trading a bit of stability for a great deal of performance, mostly on Linux
+    app.commandLine.appendSwitch("ignore-gpu-blocklist");
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-video-decode");
+}
 
 // Fix userData folder not setup on Windows
 try {
@@ -73,9 +81,10 @@ try {
 // Create default settings file
 if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, JSON.stringify({
-        shell: (process.platform === "win32") ? "powershell.exe" : "bash",
+        // macOS has shipped zsh as its default shell since Catalina
+        shell: (process.platform === "win32") ? "powershell.exe" : (process.platform === "darwin" ? (process.env.SHELL || "zsh") : "bash"),
         shellArgs: '',
-        cwd: electron.app.getPath("userData"),
+        cwd: (process.platform === "darwin") ? electron.app.getPath("home") : electron.app.getPath("userData"),
         keyboard: "en-US",
         theme: "tron",
         termFontSize: 15,
@@ -192,7 +201,6 @@ function createWindow(settings) {
         backgroundColor: '#000000',
         webPreferences: {
             devTools: true,
-	    enableRemoteModule: true,
             contextIsolation: false,
             backgroundThrottling: false,
             webSecurity: true,
@@ -202,6 +210,8 @@ function createWindow(settings) {
             experimentalFeatures: settings.experimentalFeatures || false
         }
     });
+
+    remoteMain.enable(win.webContents);
 
     win.loadURL(url.format({
         pathname: path.join(__dirname, 'ui.html'),
@@ -240,6 +250,15 @@ app.on('ready', async () => {
         TERM_PROGRAM_VERSION: app.getVersion()
     }, settings.env);
 
+    // Optional command typed into the main shell once it is up, e.g. `edex nvim` or `edex nvim ~/project`
+    // Comes from the EDEX_STARTUP_CMD env variable (set by the `edex` launcher) or from "startupCommand" in settings.json
+    const startupCommand = process.env.EDEX_STARTUP_CMD || settings.startupCommand || null;
+    delete cleanEnv.EDEX_STARTUP_CMD;
+    if (process.env.EDEX_STARTUP_CWD && fs.existsSync(process.env.EDEX_STARTUP_CWD)) {
+        settings.cwd = process.env.EDEX_STARTUP_CWD;
+    }
+    delete cleanEnv.EDEX_STARTUP_CWD;
+
     signale.pending(`Creating new terminal process on port ${settings.port || '3000'}`);
     tty = new Terminal({
         role: "server",
@@ -255,9 +274,17 @@ app.on('ready', async () => {
         signale.complete("Terminal exited", code, signal);
         app.quit();
     };
+    let startupCommandSent = false;
     tty.onopened = () => {
         signale.success("Connected to frontend!");
         signale.timeEnd("Startup");
+        if (startupCommand && !startupCommandSent) {
+            startupCommandSent = true;
+            // Leave the shell (and the UI resize) a moment to settle before typing
+            setTimeout(() => {
+                try { tty.tty.write(startupCommand + "\r"); } catch(e) { signale.error(e); }
+            }, 1200);
+        }
     };
     tty.onresized = (cols, rows) => {
         signale.info("Resized TTY to ", cols, rows);
@@ -348,9 +375,9 @@ app.on('ready', async () => {
 
 app.on('web-contents-created', (e, contents) => {
     // Prevent creating more than one window
-    contents.on('new-window', (e, url) => {
-        e.preventDefault();
-        shell.openExternal(url);
+    contents.setWindowOpenHandler(({url}) => {
+        if (/^https?:\/\//.test(url)) shell.openExternal(url);
+        return {action: "deny"};
     });
 
     // Prevent loading something else than the UI

@@ -7,7 +7,10 @@ if (cluster.isMaster) {
     // Also, leave a core available for the renderer process
     const osCPUs = require("os").cpus().length - 1;
     // See #904
-    const numCPUs = (osCPUs > 7) ? 7 : osCPUs;
+    // On macOS every systeminformation call shells out anyway, and each worker is a whole
+    // Electron-as-node process (~40MB): 3 workers are plenty and keep the efficiency cores idle.
+    const maxWorkers = (process.platform === "darwin") ? 3 : 7;
+    const numCPUs = Math.max(1, (osCPUs > maxWorkers) ? maxWorkers : osCPUs);
 
     const si = require("systeminformation");
 

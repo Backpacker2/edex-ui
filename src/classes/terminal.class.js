@@ -346,8 +346,14 @@ class Terminal {
                 return new Promise((resolve, reject) => {
                     let pid = tty._pid;
                     switch(require("os").type()) {
-                        case "Linux":
                         case "Darwin":
+                            try {
+                                resolve(require("path").basename(String(tty.process || "").trim()));
+                            } catch(e) {
+                                reject(e);
+                            }
+                            break;
+                        case "Linux":
                             require("child_process").exec(`ps -o comm --no-headers --sort=+pid -g ${pid} | tail -1`, (e, proc) => {
                                 if (e !== null) {
                                     reject(e);
@@ -406,7 +412,7 @@ class Terminal {
                 }
             }, 1000);
 
-            this.tty = this.Pty.spawn(opts.shell || "bash", (opts.params.length > 0 ? opts.params : (process.platform === "win32" ? [] : ["--login"])), {
+            this.tty = this.Pty.spawn(opts.shell || "bash", (opts.params.length > 0 ? opts.params : (process.platform === "win32" ? [] : (process.platform === "darwin" ? ["-l"] : ["--login"]))), {
                 name: opts.env.TERM || "xterm-256color",
                 cols: 80,
                 rows: 24,

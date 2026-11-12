@@ -1,0 +1,19 @@
+#!/bin/zsh
+# eDEX-UI launcher for macOS (Apple Silicon build of this folder).
+#   edex                -> open eDEX-UI in the current directory
+#   edex nvim           -> open eDEX-UI and start neovim right away
+#   edex nvim notes.md  -> same, with arguments (any command works, not only nvim)
+#   edex --intro        -> show the boot animation (skipped by default)
+ROOT="${0:A:h:h}"
+ELECTRON="$ROOT/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+if [[ ! -x "$ELECTRON" ]]; then
+  echo "Electron not found. Run:  cd \"$ROOT\" && npm run install-darwin" >&2
+  exit 1
+fi
+flags=(--nointro)
+if [[ "$1" == "--intro" ]]; then flags=(); shift; fi
+if (( $# > 0 )); then
+  export EDEX_STARTUP_CMD="${(j: :)${(q)@}}"
+fi
+export EDEX_STARTUP_CWD="$PWD"
+nohup "$ELECTRON" "$ROOT/src" $flags >"${TMPDIR:-/tmp}/edex-ui.log" 2>&1 &!

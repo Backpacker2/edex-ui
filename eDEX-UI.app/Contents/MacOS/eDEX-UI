@@ -1,0 +1,5 @@
+#!/bin/zsh
+# Double-clickable launcher: starts the Electron runtime of the edex-ui folder this app lives in.
+ROOT="${0:A:h:h:h:h}"
+cd "$HOME"
+exec "$ROOT/bin/edex" "$@"

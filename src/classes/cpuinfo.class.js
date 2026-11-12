@@ -152,7 +152,9 @@ class Cpuinfo {
     updateCPUtemp() {
         window.si.cpuTemperature().then(data => {
             try {
-                document.getElementById("mod_cpuinfo_temp").innerText = `${data.max}°C`;
+                // Apple Silicon exposes no SMC temperature to systeminformation: show a placeholder instead of "null°C"
+                let temp = (data && typeof data.max === "number" && data.max > 0) ? Math.round(data.max) : "--";
+                document.getElementById("mod_cpuinfo_temp").innerText = `${temp}°C`;
             } catch(e) {
                 // See above notice
             }
